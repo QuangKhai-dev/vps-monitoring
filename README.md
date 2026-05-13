@@ -1,4 +1,6 @@
 # VPS Monitor
+<img width="2995" height="1213" alt="screenshot_1778664979" src="https://github.com/user-attachments/assets/1e0f5d1b-4570-41e7-bde9-2ffec365e74c" />
+
 
 > Open-source, self-hosted monitoring & management dashboard for your VPS fleet.
 > Built with **Next.js 14**, **MongoDB**, and a tiny **bash agent** that installs in one line.
