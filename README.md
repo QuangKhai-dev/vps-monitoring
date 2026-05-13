@@ -16,6 +16,7 @@
 - **Single-admin model** — no public sign-ups. The first account becomes admin.
 - **Self-hosted** — your metrics live in your MongoDB, not someone else's cloud.
 - **Tiny agent** — pure bash, no compiled binaries, ~5 MB RAM footprint.
+- **Telegram alerts** — optional notify when CPU, RAM, or disk usage crosses thresholds (per-server cooldown).
 
 ## 🚀 Quick start (Docker)
 
@@ -94,6 +95,10 @@ Then visit `http://localhost:3000`.
 | `JWT_SECRET`                   | yes (prod) | dev-only fallback                    | Secret used to sign session cookies.         |
 | `NEXT_PUBLIC_APP_URL`          | yes      | `http://localhost:3000`                | Public URL where the dashboard is reachable. |
 | `AGENT_OFFLINE_AFTER_SECONDS`  | no       | `60`                                   | After how many seconds an agent is "offline". |
+
+### Telegram overload alerts
+
+Configure the bot token, chat id, thresholds (CPU, RAM, disk `/`), and per-server cooldown in **Settings** in the web UI. Values are stored in MongoDB (not in environment variables). Each agent heartbeat is checked: if CPU, RAM, or disk (/) is at or above the configured thresholds, one HTML message is sent to Telegram. The same server will not receive another alert until the cooldown period passes (even if multiple metrics are high).
 
 ## 🏗️ Architecture
 

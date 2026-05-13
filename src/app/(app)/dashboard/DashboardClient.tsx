@@ -17,6 +17,7 @@ import { StatCard } from '@/components/StatCard';
 import { StatusDot } from '@/components/StatusDot';
 import { UsageBar } from '@/components/UsageBar';
 import { OsBadge } from '@/components/OsBadge';
+import { ServerActions } from '@/components/ServerActions';
 import { formatBps, formatBytes, formatUptime, percent, timeAgo } from '@/lib/utils';
 
 interface AgentSummary {
@@ -144,7 +145,7 @@ export function DashboardClient() {
         ) : (
           <div className="grid grid-cols-1 gap-3 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">
             {agents.map((a) => (
-              <ServerCard key={a.agentId} agent={a} />
+              <ServerCard key={a.agentId} agent={a} onUpdated={() => mutate()} />
             ))}
           </div>
         )}
@@ -153,69 +154,81 @@ export function DashboardClient() {
   );
 }
 
-function ServerCard({ agent: a }: { agent: AgentSummary }) {
+function ServerCard({ agent: a, onUpdated }: { agent: AgentSummary; onUpdated: () => void }) {
   const memPct = percent(a.latest?.memUsedBytes ?? 0, a.latest?.memTotalBytes ?? a.totalMemoryBytes);
   const diskPct = percent(a.latest?.diskUsedBytes ?? 0, a.latest?.diskTotalBytes ?? a.totalDiskBytes);
   const cpu = a.latest?.cpuPercent ?? 0;
+  const title = a.label || a.hostname;
 
   return (
-    <Link
-      href={`/servers/${a.agentId}`}
-      className="group relative block rounded-xl border border-border bg-bg-soft/40 p-4 transition-colors hover:border-ink-soft hover:bg-bg-card"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <StatusDot online={a.online} />
-            <div className="truncate text-sm font-semibold text-ink">
-              {a.label || a.hostname}
+    <div className="group relative rounded-xl border border-border bg-bg-soft/40 p-4 transition-colors hover:border-ink-soft hover:bg-bg-card">
+      <Link
+        href={`/servers/${a.agentId}`}
+        className="absolute inset-0 z-0 rounded-xl outline-none ring-inset focus-visible:ring-2 focus-visible:ring-brand-500"
+        aria-label={`Open ${title}`}
+      />
+
+      <div className="relative z-10 space-y-4 pointer-events-none">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <StatusDot online={a.online} />
+              <div className="truncate text-sm font-semibold text-ink">{title}</div>
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-xs text-ink-soft">
+              <OsBadge os={a.os} version={a.osVersion} />
+              {a.publicIp && <span className="font-mono">{a.publicIp}</span>}
             </div>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-ink-soft">
-            <OsBadge os={a.os} version={a.osVersion} />
-            {a.publicIp && <span className="font-mono">{a.publicIp}</span>}
+          <div className="flex shrink-0 items-center gap-1 pointer-events-auto">
+            <ServerActions
+              agentId={a.agentId}
+              label={a.label}
+              hostname={a.hostname}
+              onDone={onUpdated}
+            />
+            <div
+              className={`chip ${
+                a.online ? 'chip-success' : 'chip-muted'
+              } text-[10px]`}
+            >
+              {a.online ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              {a.online ? 'Online' : timeAgo(a.lastSeenAt)}
+            </div>
           </div>
         </div>
-        <div
-          className={`chip ${
-            a.online ? 'chip-success' : 'chip-muted'
-          } shrink-0 text-[10px]`}
-        >
-          {a.online ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-          {a.online ? 'Online' : timeAgo(a.lastSeenAt)}
+
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <Metric icon={Cpu} value={`${cpu.toFixed(0)}%`} label="CPU" />
+          <Metric icon={MemoryStick} value={`${memPct.toFixed(0)}%`} label="RAM" />
+          <Metric icon={HardDrive} value={`${diskPct.toFixed(0)}%`} label="Disk" />
+        </div>
+
+        <div className="space-y-2">
+          <UsageBar value={cpu} label="CPU" hint={`${cpu.toFixed(1)}%`} />
+          <UsageBar
+            value={memPct}
+            label="Memory"
+            hint={`${formatBytes(a.latest?.memUsedBytes ?? 0)} / ${formatBytes(
+              a.latest?.memTotalBytes ?? a.totalMemoryBytes
+            )}`}
+          />
+          <UsageBar
+            value={diskPct}
+            label="Disk"
+            hint={`${formatBytes(a.latest?.diskUsedBytes ?? 0)} / ${formatBytes(
+              a.latest?.diskTotalBytes ?? a.totalDiskBytes
+            )}`}
+          />
+        </div>
+
+        <div className="flex items-center justify-between border-t border-border pt-3 text-[11px] text-ink-soft">
+          <span>↓ {formatBps(a.latest?.netRxBps ?? 0)}</span>
+          <span>↑ {formatBps(a.latest?.netTxBps ?? 0)}</span>
+          <span>up {formatUptime(a.latest?.uptimeSeconds ?? 0)}</span>
         </div>
       </div>
-
-      <div className="mt-4 grid grid-cols-3 gap-2 text-[11px]">
-        <Metric icon={Cpu} value={`${cpu.toFixed(0)}%`} label="CPU" />
-        <Metric icon={MemoryStick} value={`${memPct.toFixed(0)}%`} label="RAM" />
-        <Metric icon={HardDrive} value={`${diskPct.toFixed(0)}%`} label="Disk" />
-      </div>
-
-      <div className="mt-4 space-y-2">
-        <UsageBar value={cpu} label="CPU" hint={`${cpu.toFixed(1)}%`} />
-        <UsageBar
-          value={memPct}
-          label="Memory"
-          hint={`${formatBytes(a.latest?.memUsedBytes ?? 0)} / ${formatBytes(
-            a.latest?.memTotalBytes ?? a.totalMemoryBytes
-          )}`}
-        />
-        <UsageBar
-          value={diskPct}
-          label="Disk"
-          hint={`${formatBytes(a.latest?.diskUsedBytes ?? 0)} / ${formatBytes(
-            a.latest?.diskTotalBytes ?? a.totalDiskBytes
-          )}`}
-        />
-      </div>
-
-      <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-[11px] text-ink-soft">
-        <span>↓ {formatBps(a.latest?.netRxBps ?? 0)}</span>
-        <span>↑ {formatBps(a.latest?.netTxBps ?? 0)}</span>
-        <span>up {formatUptime(a.latest?.uptimeSeconds ?? 0)}</span>
-      </div>
-    </Link>
+    </div>
   );
 }
 

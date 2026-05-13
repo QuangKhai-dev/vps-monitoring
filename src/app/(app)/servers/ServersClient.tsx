@@ -7,6 +7,7 @@ import { ChevronRight, PlusCircle, RefreshCw, Search } from 'lucide-react';
 import { StatusDot } from '@/components/StatusDot';
 import { OsBadge } from '@/components/OsBadge';
 import { UsageBar } from '@/components/UsageBar';
+import { ServerActions } from '@/components/ServerActions';
 import { formatBytes, percent, timeAgo } from '@/lib/utils';
 
 interface AgentSummary {
@@ -122,7 +123,8 @@ export function ServersClient() {
                   <th className="px-3 py-3 font-medium">RAM</th>
                   <th className="px-3 py-3 font-medium">Disk</th>
                   <th className="px-3 py-3 font-medium">Last seen</th>
-                  <th className="px-5 py-3" />
+                  <th className="px-3 py-3 text-center font-medium">Actions</th>
+                  <th className="w-10 px-3 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -179,7 +181,18 @@ export function ServersClient() {
                           timeAgo(a.lastSeenAt)
                         )}
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-3 py-3">
+                        <div className="flex justify-center">
+                          <ServerActions
+                            agentId={a.agentId}
+                            label={a.label}
+                            hostname={a.hostname}
+                            onDone={() => mutate()}
+                            size="sm"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-right">
                         <Link
                           href={`/servers/${a.agentId}`}
                           className="inline-flex items-center text-ink-soft transition-colors group-hover:text-ink"

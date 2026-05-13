@@ -15,7 +15,8 @@ export async function GET() {
   }
 
   await connectDB();
-  const agents = await Agent.find({}).sort({ lastSeenAt: -1, createdAt: -1 }).lean();
+  /** Stable order (not by lastSeenAt) so dashboard / server list cards do not reorder every heartbeat. */
+  const agents = await Agent.find({}).sort({ hostname: 1, agentId: 1 }).lean();
   const ids = agents.map((a) => a.agentId);
 
   const latest = await Metric.aggregate([

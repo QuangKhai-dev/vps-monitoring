@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { getAppSettings } from '@/lib/app-settings';
 import { connectDB } from '@/lib/db';
+import { env } from '@/lib/env';
 import { Agent } from '@/lib/models/Agent';
 import { Metric } from '@/lib/models/Metric';
+import { sendTelegramOverloadIfNeeded } from '@/lib/telegram-alerts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -70,6 +73,24 @@ export async function POST(req: Request) {
     uptimeSeconds: parsed.data.uptimeSeconds,
     processCount: parsed.data.processCount,
   });
+
+  const appSettings = await getAppSettings();
+  const sent = await sendTelegramOverloadIfNeeded(
+    agent,
+    {
+      cpuPercent: parsed.data.cpuPercent,
+      memUsedBytes: parsed.data.memUsedBytes,
+      memTotalBytes: parsed.data.memTotalBytes,
+      diskUsedBytes: parsed.data.diskUsedBytes,
+      diskTotalBytes: parsed.data.diskTotalBytes,
+    },
+    appSettings,
+    env.APP_URL
+  );
+  if (sent) {
+    agent.lastTelegramAlertAt = now;
+    await agent.save();
+  }
 
   return NextResponse.json({ ok: true });
 }
