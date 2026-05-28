@@ -22,7 +22,9 @@ import { OsBadge } from '@/components/OsBadge';
 import { UsageBar } from '@/components/UsageBar';
 import { MetricChart } from '@/components/MetricChart';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ContainersTab } from '@/components/ContainersTab';
 import { RenameServerDialog } from '@/components/RenameServerDialog';
+import { TerminalPanel } from '@/components/TerminalPanel';
 import { formatBps, formatBytes, formatUptime, percent, timeAgo } from '@/lib/utils';
 
 interface AgentDetail {
@@ -392,6 +394,10 @@ export function ServerDetailClient({ agentId }: { agentId: string }) {
           </div>
         </div>
       </div>
+
+      <ContainersTab agentId={agent.agentId} />
+
+      <TerminalPanel agentId={agent.agentId} />
 
       <RenameServerDialog
         open={renameOpen}

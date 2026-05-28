@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   });
 
   const token = await signSession({
-    sub: user._id.toString(),
+    sub: user.id,
     username: user.username,
     role: 'admin',
   });

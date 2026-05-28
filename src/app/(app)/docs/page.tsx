@@ -66,7 +66,7 @@ export default function DocsPage() {
             <strong className="text-ink">Web:</strong> Next.js 14 App Router (this app).
           </li>
           <li>
-            <strong className="text-ink">Database:</strong> MongoDB, two collections{' '}
+            <strong className="text-ink">Database:</strong> PostgreSQL (users, agents, metrics, settings){' '}
             <code className="text-ink-muted">agents</code> &{' '}
             <code className="text-ink-muted">metrics</code>.
           </li>

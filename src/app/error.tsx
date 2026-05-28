@@ -19,7 +19,7 @@ export default function AppError({
       <div className="mx-auto max-w-lg text-center">
         <h1 className="text-xl font-semibold">Something went wrong</h1>
         <p className="mt-3 text-sm text-ink-muted">
-          A server error occurred. Often this is a failed <strong className="text-ink">MongoDB</strong>{' '}
+          A server error occurred. Often this is a failed <strong className="text-ink">PostgreSQL</strong>{' '}
           connection or a missing <strong className="text-ink">JWT_SECRET</strong> in production.
         </p>
         {error.digest && (

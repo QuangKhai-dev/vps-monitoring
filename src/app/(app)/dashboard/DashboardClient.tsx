@@ -4,6 +4,7 @@ import useSWR from 'swr';
 import Link from 'next/link';
 import {
   Activity,
+  Boxes,
   Cpu,
   HardDrive,
   MemoryStick,
@@ -33,6 +34,7 @@ interface AgentSummary {
   publicIp?: string;
   online: boolean;
   lastSeenAt?: string;
+  containers?: { running: number; total: number };
   latest: {
     cpuPercent: number;
     memUsedBytes: number;
@@ -254,6 +256,15 @@ function ServerCard({ agent: a, onUpdated }: { agent: AgentSummary; onUpdated: (
             <span title="Cumulative since boot (kernel counters)">
               ↑ {formatBytes(a.latest?.netTxBytes ?? 0)}
             </span>
+            {a.containers && a.containers.total > 0 && (
+              <span
+                className="inline-flex items-center gap-1 text-ink-soft"
+                title="Docker containers"
+              >
+                <Boxes className="h-3 w-3" />
+                {a.containers.running}/{a.containers.total}
+              </span>
+            )}
           </div>
         </div>
       </div>

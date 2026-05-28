@@ -14,6 +14,10 @@ export type ResolvedAppSettings = {
   alertRamPercent: number;
   alertDiskPercent: number;
   telegramCooldownSeconds: number;
+  containerMetricsRetentionDays: number;
+  containerMetricsIntervalSeconds: number;
+  containerControlEnabled: boolean;
+  shellCommandEnabled: boolean;
 };
 
 const CACHE_TTL_MS = 5000;
@@ -31,6 +35,10 @@ function toResolved(doc: IAppSettings): ResolvedAppSettings {
     alertRamPercent: doc.alertRamPercent,
     alertDiskPercent: doc.alertDiskPercent,
     telegramCooldownSeconds: doc.telegramCooldownSeconds,
+    containerMetricsRetentionDays: doc.containerMetricsRetentionDays,
+    containerMetricsIntervalSeconds: doc.containerMetricsIntervalSeconds,
+    containerControlEnabled: doc.containerControlEnabled,
+    shellCommandEnabled: doc.shellCommandEnabled,
   };
 }
 
@@ -42,8 +50,8 @@ async function loadDoc() {
     doc = await AppSettings.create({ __singleton: 1 });
     return doc;
   } catch (e: unknown) {
-    const code = typeof e === 'object' && e !== null && 'code' in e ? (e as { code: number }).code : 0;
-    if (code === 11_000) {
+    const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: string }).code) : '';
+    if (code === '23505') {
       const again = await AppSettings.findOne({ __singleton: 1 });
       if (again) return again;
     }
@@ -73,6 +81,10 @@ export type PublicAlertSettings = {
   alertRamPercent: number;
   alertDiskPercent: number;
   telegramCooldownSeconds: number;
+  containerMetricsRetentionDays: number;
+  containerMetricsIntervalSeconds: number;
+  containerControlEnabled: boolean;
+  shellCommandEnabled: boolean;
 };
 
 export async function getPublicAlertSettings(): Promise<PublicAlertSettings> {
@@ -85,6 +97,10 @@ export async function getPublicAlertSettings(): Promise<PublicAlertSettings> {
     alertRamPercent: r.alertRamPercent,
     alertDiskPercent: r.alertDiskPercent,
     telegramCooldownSeconds: r.telegramCooldownSeconds,
+    containerMetricsRetentionDays: r.containerMetricsRetentionDays,
+    containerMetricsIntervalSeconds: r.containerMetricsIntervalSeconds,
+    containerControlEnabled: r.containerControlEnabled,
+    shellCommandEnabled: r.shellCommandEnabled,
   };
 }
 
@@ -97,6 +113,10 @@ export type UpdateAppSettingsInput = {
   alertRamPercent?: number;
   alertDiskPercent?: number;
   telegramCooldownSeconds?: number;
+  containerMetricsRetentionDays?: number;
+  containerMetricsIntervalSeconds?: number;
+  containerControlEnabled?: boolean;
+  shellCommandEnabled?: boolean;
 };
 
 export async function updateAppSettings(input: UpdateAppSettingsInput): Promise<PublicAlertSettings> {
@@ -134,6 +154,20 @@ export async function updateAppSettings(input: UpdateAppSettingsInput): Promise<
   if (input.telegramCooldownSeconds !== undefined) {
     const c = Math.round(input.telegramCooldownSeconds);
     doc.telegramCooldownSeconds = Math.max(60, Math.min(86_400, c));
+  }
+  if (input.containerMetricsRetentionDays !== undefined) {
+    const d = Math.round(input.containerMetricsRetentionDays);
+    doc.containerMetricsRetentionDays = Math.max(1, Math.min(90, d));
+  }
+  if (input.containerMetricsIntervalSeconds !== undefined) {
+    const s = Math.round(input.containerMetricsIntervalSeconds);
+    doc.containerMetricsIntervalSeconds = Math.max(5, Math.min(3600, s));
+  }
+  if (input.containerControlEnabled !== undefined) {
+    doc.containerControlEnabled = Boolean(input.containerControlEnabled);
+  }
+  if (input.shellCommandEnabled !== undefined) {
+    doc.shellCommandEnabled = Boolean(input.shellCommandEnabled);
   }
 
   await doc.save();

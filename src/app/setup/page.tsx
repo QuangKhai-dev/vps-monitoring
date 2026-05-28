@@ -34,7 +34,7 @@ export default async function SetupPage() {
           <ul className="space-y-3 text-sm">
             <li className="flex items-start gap-3 text-ink-muted">
               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-              <span>Self-hosted, your data stays on your MongoDB.</span>
+              <span>Self-hosted, your data stays on your PostgreSQL.</span>
             </li>
             <li className="flex items-start gap-3 text-ink-muted">
               <Server className="mt-0.5 h-5 w-5 shrink-0 text-ink-muted" />

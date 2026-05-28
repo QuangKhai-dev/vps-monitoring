@@ -18,7 +18,7 @@ export async function GET(_req: Request, { params }: RouteContext) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await connectDB();
-  const agent = await Agent.findOne({ agentId: params.agentId }).lean();
+  const agent = await Agent.findOne({ agentId: params.agentId });
   if (!agent) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const latest = await Metric.findOne({ agentId: params.agentId }).sort({ ts: -1 }).lean();

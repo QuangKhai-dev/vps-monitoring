@@ -146,6 +146,8 @@ CONFIG_FILE="/opt/vps-monitor-agent/agent.conf"
 # shellcheck disable=SC1090
 . "$CONFIG_FILE"
 
+DOCKER_SOCK="/var/run/docker.sock"
+
 PREV_RX=0; PREV_TX=0; PREV_TS=0
 PREV_CPU_TOTAL=0; PREV_CPU_IDLE=0
 
@@ -180,6 +182,202 @@ read_net() {
 
 get_disk() {
   df -B1 --output=used,size / 2>/dev/null | tail -1
+}
+
+docker_available() {
+  [ -S "$DOCKER_SOCK" ] || return 1
+  curl -fsS --unix-socket "$DOCKER_SOCK" --max-time 3 "http://localhost/_ping" >/dev/null 2>&1
+}
+
+docker_api_get() {
+  curl -fsS --unix-socket "$DOCKER_SOCK" --max-time 5 "http://localhost$1" 2>/dev/null
+}
+
+docker_api_post() {
+  curl -fsS --unix-socket "$DOCKER_SOCK" --max-time 30 -X POST "http://localhost$1" 2>/dev/null
+}
+
+collect_docker_containers() {
+  # Output a JSON array of container snapshots, each with optional live stats.
+  if ! docker_available; then
+    echo "[]"
+    return
+  fi
+  local list
+  list=$(docker_api_get "/containers/json?all=true" || echo "[]")
+  [ -z "$list" ] && list="[]"
+
+  # Map list entries; for each running container fetch stats once (no-stream).
+  echo "$list" | jq -c '.[] | {
+    id: .Id,
+    name: ((.Names // []) | .[0] // "" | sub("^/"; "")),
+    image: (.Image // ""),
+    imageId: (.ImageID // ""),
+    state: (.State // ""),
+    status: (.State // ""),
+    statusText: (.Status // ""),
+    createdAt: (if .Created then (.Created | strftime("%Y-%m-%dT%H:%M:%SZ")) else null end),
+    ports: ((.Ports // []) | map({
+      host: (.PublicPort // null),
+      container: (.PrivatePort // null),
+      protocol: (.Type // null),
+      ip: (.IP // null)
+    }))
+  }' 2>/dev/null | while IFS= read -r item; do
+    local cid state stats
+    cid=$(echo "$item" | jq -r '.id')
+    state=$(echo "$item" | jq -r '.state')
+    if [ "$state" = "running" ] && [ -n "$cid" ]; then
+      stats=$(docker_api_get "/containers/$cid/stats?stream=false" || echo "")
+    else
+      stats=""
+    fi
+    if [ -n "$stats" ]; then
+      echo "$item" | jq -c --argjson s "$stats" '
+        . + (
+          ($s.cpu_stats.cpu_usage.total_usage // 0) as $cu |
+          ($s.precpu_stats.cpu_usage.total_usage // 0) as $pcu |
+          ($s.cpu_stats.system_cpu_usage // 0) as $sys |
+          ($s.precpu_stats.system_cpu_usage // 0) as $psys |
+          ($s.cpu_stats.online_cpus //
+            (($s.cpu_stats.cpu_usage.percpu_usage // []) | length) //
+            1) as $cpus |
+          (($cu - $pcu) | tonumber) as $cd |
+          (($sys - $psys) | tonumber) as $sd |
+          (if $sd > 0 and $cd > 0 then ($cd / $sd) * ($cpus | tonumber) * 100 else 0 end) as $cpuPct |
+          ((($s.memory_stats.usage // 0) - (($s.memory_stats.stats.cache // 0) // 0))) as $memUsed |
+          ($s.memory_stats.limit // 0) as $memLimit |
+          (($s.networks // {}) | to_entries | map(.value.rx_bytes // 0) | add // 0) as $rx |
+          (($s.networks // {}) | to_entries | map(.value.tx_bytes // 0) | add // 0) as $tx |
+          (($s.blkio_stats.io_service_bytes_recursive // [])
+            | map(select(.op == "Read" or .op == "read") | .value // 0) | add // 0) as $blkR |
+          (($s.blkio_stats.io_service_bytes_recursive // [])
+            | map(select(.op == "Write" or .op == "write") | .value // 0) | add // 0) as $blkW |
+          {
+            cpuPercent: ($cpuPct | (. * 100 | round) / 100),
+            memUsedBytes: ($memUsed | floor),
+            memLimitBytes: $memLimit,
+            netRxBytes: $rx,
+            netTxBytes: $tx,
+            blockReadBytes: $blkR,
+            blockWriteBytes: $blkW,
+            startedAt: ($s.read // null)
+          }
+        )'
+    else
+      echo "$item" | jq -c '. + {
+        cpuPercent: 0,
+        memUsedBytes: 0,
+        memLimitBytes: 0,
+        netRxBytes: 0,
+        netTxBytes: 0,
+        blockReadBytes: 0,
+        blockWriteBytes: 0
+      }'
+    fi
+  done | jq -sc '.' 2>/dev/null || echo "[]"
+}
+
+execute_command() {
+  # $1 = command JSON: {id, action, containerId, args}
+  local cmd="$1"
+  local id action cid tail body out err status exit_code shell_cmd cwd timeout_seconds tmp_out
+  id=$(echo "$cmd" | jq -r '.id // empty')
+  action=$(echo "$cmd" | jq -r '.action // empty')
+  cid=$(echo "$cmd" | jq -r '.containerId // empty')
+  [ -z "$id" ] || [ -z "$action" ] && return
+
+  status="success"
+  out=""
+  err=""
+  exit_code=0
+
+  case "$action" in
+    shell)
+      shell_cmd=$(echo "$cmd" | jq -r '.args.command // empty')
+      cwd=$(echo "$cmd" | jq -r '.args.cwd // empty')
+      timeout_seconds=$(echo "$cmd" | jq -r '.args.timeoutSeconds // 30')
+      case "$timeout_seconds" in
+        ''|*[!0-9]*) timeout_seconds=30 ;;
+      esac
+      [ "$timeout_seconds" -lt 1 ] && timeout_seconds=1
+      [ "$timeout_seconds" -gt 120 ] && timeout_seconds=120
+
+      if [ -z "$shell_cmd" ]; then
+        status="failed"
+        err="empty command"
+        exit_code=2
+      else
+        tmp_out="$(mktemp)"
+        if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+          (cd "$cwd" && timeout "$timeout_seconds" bash -lc "$shell_cmd") >"$tmp_out" 2>&1
+        else
+          timeout "$timeout_seconds" bash -lc "$shell_cmd" >"$tmp_out" 2>&1
+        fi
+        exit_code=$?
+        out=$(head -c 65536 "$tmp_out")
+        rm -f "$tmp_out"
+        if [ "$exit_code" -ne 0 ]; then
+          status="failed"
+          err="command exited with code $exit_code"
+        fi
+      fi
+      ;;
+    start|stop|restart|logs)
+      if ! docker_available; then
+        status="failed"
+        err="docker socket unavailable"
+      else
+        case "$action" in
+      start)
+        if ! err=$(docker_api_post "/containers/$cid/start" 2>&1); then
+          status="failed"
+        fi
+        ;;
+      stop)
+        if ! err=$(docker_api_post "/containers/$cid/stop" 2>&1); then
+          status="failed"
+        fi
+        ;;
+      restart)
+        if ! err=$(docker_api_post "/containers/$cid/restart" 2>&1); then
+          status="failed"
+        fi
+        ;;
+      logs)
+        tail=$(echo "$cmd" | jq -r '.args.tail // 200')
+        # Docker logs over the API stream the body raw (with framing for tty=false).
+        # `docker logs` CLI normalizes that for us — much simpler.
+        if command -v docker >/dev/null 2>&1; then
+          out=$(docker logs --tail "$tail" "$cid" 2>&1 | head -c 65536) || true
+        else
+          status="failed"
+          err="docker CLI not installed"
+        fi
+        ;;
+        esac
+      fi
+      ;;
+    *)
+      status="failed"
+      err="unknown action: $action"
+      exit_code=2
+      ;;
+  esac
+
+  body=$(jq -n \
+    --arg agentId "$AGENT_ID" \
+    --arg token "$AGENT_TOKEN" \
+    --arg commandId "$id" \
+    --arg status "$status" \
+    --arg stdout "$out" \
+    --arg error "$err" \
+    --argjson exitCode "$exit_code" \
+    '{agentId:$agentId, token:$token, commandId:$commandId, status:$status, result:{stdout:$stdout, error:$error, exitCode:$exitCode}}')
+
+  curl -fsS --max-time 10 -X POST "$SERVER_URL/api/agents/commands/ack" \
+    -H 'Content-Type: application/json' \
+    -d "$body" >/dev/null 2>&1 || true
 }
 
 # Prime CPU + net counters once
@@ -237,6 +435,10 @@ while true; do
   # Process count
   PROC_COUNT=$(ls -1 /proc 2>/dev/null | grep -c '^[0-9][0-9]*$')
 
+  # Docker containers (empty array when no docker socket)
+  CONTAINERS_JSON=$(collect_docker_containers)
+  [ -z "$CONTAINERS_JSON" ] && CONTAINERS_JSON="[]"
+
   PAYLOAD=$(jq -n \
     --arg agentId "$AGENT_ID" \
     --arg token   "$AGENT_TOKEN" \
@@ -256,11 +458,21 @@ while true; do
     --argjson netTxBps   "$TX_BPS" \
     --argjson uptimeSeconds "$UPTIME" \
     --argjson processCount  "$PROC_COUNT" \
-    '{agentId:$agentId, token:$token, cpuPercent:$cpuPercent, loadAvg1:$loadAvg1, loadAvg5:$loadAvg5, loadAvg15:$loadAvg15, memUsedBytes:$memUsedBytes, memTotalBytes:$memTotalBytes, swapUsedBytes:$swapUsedBytes, swapTotalBytes:$swapTotalBytes, diskUsedBytes:$diskUsedBytes, diskTotalBytes:$diskTotalBytes, netRxBytes:$netRxBytes, netTxBytes:$netTxBytes, netRxBps:$netRxBps, netTxBps:$netTxBps, uptimeSeconds:$uptimeSeconds, processCount:$processCount}')
+    --argjson containers "$CONTAINERS_JSON" \
+    '{agentId:$agentId, token:$token, cpuPercent:$cpuPercent, loadAvg1:$loadAvg1, loadAvg5:$loadAvg5, loadAvg15:$loadAvg15, memUsedBytes:$memUsedBytes, memTotalBytes:$memTotalBytes, swapUsedBytes:$swapUsedBytes, swapTotalBytes:$swapTotalBytes, diskUsedBytes:$diskUsedBytes, diskTotalBytes:$diskTotalBytes, netRxBytes:$netRxBytes, netTxBytes:$netTxBytes, netRxBps:$netRxBps, netTxBps:$netTxBps, uptimeSeconds:$uptimeSeconds, processCount:$processCount, containers:$containers}')
 
-  curl -fsS --max-time 10 -X POST "$SERVER_URL/api/agents/heartbeat" \
+  RESPONSE=$(curl -fsS --max-time 15 -X POST "$SERVER_URL/api/agents/heartbeat" \
     -H 'Content-Type: application/json' \
-    -d "$PAYLOAD" >/dev/null 2>&1 || true
+    -d "$PAYLOAD" 2>/dev/null || echo "")
+
+  if [ -n "$RESPONSE" ]; then
+    PENDING_COUNT=$(echo "$RESPONSE" | jq '.pendingCommands | length // 0' 2>/dev/null || echo 0)
+    if [ "${PENDING_COUNT:-0}" -gt 0 ]; then
+      while IFS= read -r cmd; do
+        [ -n "$cmd" ] && execute_command "$cmd"
+      done < <(echo "$RESPONSE" | jq -c '.pendingCommands[]' 2>/dev/null)
+    fi
+  fi
 
   sleep "$INTERVAL"
 done

@@ -3,6 +3,7 @@
 import useSWR from 'swr';
 import { useEffect, useState } from 'react';
 import {
+  Boxes,
   Check,
   Copy,
   KeyRound,
@@ -23,6 +24,10 @@ type AlertSettingsResponse = {
   alertRamPercent: number;
   alertDiskPercent: number;
   telegramCooldownSeconds: number;
+  containerMetricsRetentionDays: number;
+  containerMetricsIntervalSeconds: number;
+  containerControlEnabled: boolean;
+  shellCommandEnabled: boolean;
 };
 
 export function SettingsClient({
@@ -57,6 +62,12 @@ export function SettingsClient({
   const [savingAlerts, setSavingAlerts] = useState(false);
   const [testing, setTesting] = useState(false);
 
+  const [containerRetention, setContainerRetention] = useState('7');
+  const [containerInterval, setContainerInterval] = useState('30');
+  const [containerControlEnabled, setContainerControlEnabled] = useState(true);
+  const [shellCommandEnabled, setShellCommandEnabled] = useState(false);
+  const [savingDocker, setSavingDocker] = useState(false);
+
   useEffect(() => {
     if (!alertData || alertsHydrated) return;
     setChatId(alertData.telegramChatId);
@@ -64,6 +75,10 @@ export function SettingsClient({
     setRam(String(alertData.alertRamPercent));
     setDisk(String(alertData.alertDiskPercent));
     setCooldown(String(alertData.telegramCooldownSeconds));
+    setContainerRetention(String(alertData.containerMetricsRetentionDays ?? 7));
+    setContainerInterval(String(alertData.containerMetricsIntervalSeconds ?? 30));
+    setContainerControlEnabled(alertData.containerControlEnabled !== false);
+    setShellCommandEnabled(alertData.shellCommandEnabled === true);
     setAlertsHydrated(true);
   }, [alertData, alertsHydrated]);
 
@@ -143,6 +158,31 @@ export function SettingsClient({
     setBotToken('');
     setClearBotToken(false);
     toast.success('Đã lưu cấu hình Telegram');
+  };
+
+  const saveDocker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const days = Math.round(Number(containerRetention));
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      return toast.error('Retention: nhập số từ 1 đến 90 ngày.');
+    }
+    setSavingDocker(true);
+    const res = await fetch('/api/settings/alerts', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        containerMetricsRetentionDays: days,
+        containerControlEnabled,
+        shellCommandEnabled,
+      }),
+    });
+    const out = await res.json().catch(() => ({}));
+    setSavingDocker(false);
+    if (!res.ok) {
+      return toast.error(out.error ?? 'Không lưu được');
+    }
+    mutateAlerts(out, false);
+    toast.success('Đã lưu cấu hình Docker');
   };
 
   const sendTest = async () => {
@@ -247,7 +287,7 @@ export function SettingsClient({
         </h2>
         <p className="mt-1 text-sm text-ink-muted">
           Khi CPU, RAM hoặc dung lượng ổ đĩa (/) vượt ngưỡng, dashboard gửi một tin qua Telegram. Cấu hình
-          được lưu trong MongoDB (không dùng biến môi trường cho token hay ngưỡng).
+          được lưu trong PostgreSQL (không dùng biến môi trường cho token hay ngưỡng).
         </p>
 
         {alertLoading && (
@@ -351,7 +391,7 @@ export function SettingsClient({
             </div>
 
             <p className="mt-4 text-xs text-ink-soft">
-              Bot token được lưu trong cùng database với dashboard — chỉ phù hợp khi bạn kiểm soát được MongoDB
+              Bot token được lưu trong cùng database với dashboard — chỉ phù hợp khi bạn kiểm soát được PostgreSQL
               và máy chủ ứng dụng.
             </p>
 
@@ -373,6 +413,81 @@ export function SettingsClient({
             </div>
           </>
         )}
+      </form>
+
+      <form onSubmit={saveDocker} className="card card-pad">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+          <Boxes className="h-4 w-4 text-ink-muted" />
+          Docker monitoring
+        </h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Mỗi VPS có Docker socket sẽ gửi danh sách container và thống kê CPU/RAM. Bạn có thể
+          giới hạn thời gian lưu lịch sử và tạm tắt tính năng điều khiển container.
+        </p>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label className="label">Giữ lịch sử (ngày)</label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={90}
+              value={containerRetention}
+              onChange={(e) => setContainerRetention(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-ink-soft">
+              Tự dọn dẹp mỗi ngày 03:00. Dữ liệu container_metrics cũ hơn sẽ bị xoá.
+            </p>
+          </div>
+          <div>
+            <label className="label">Tần suất agent (giây)</label>
+            <input
+              className="input"
+              type="number"
+              value={containerInterval}
+              disabled
+            />
+            <p className="mt-1 text-[11px] text-ink-soft">
+              Hiện đang chạy theo INTERVAL của agent (mặc định 15s). Đổi tần suất cần re-install
+              agent bằng query <code>?interval=</code>.
+            </p>
+          </div>
+          <div className="md:col-span-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={containerControlEnabled}
+                onChange={(e) => setContainerControlEnabled(e.target.checked)}
+              />
+              Cho phép điều khiển container (Start / Stop / Restart) từ dashboard
+            </label>
+            <p className="mt-1 text-[11px] text-ink-soft">
+              Khi tắt, API <code>action</code> trả 403. Logs vẫn xem được.
+            </p>
+          </div>
+          <div className="md:col-span-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={shellCommandEnabled}
+                onChange={(e) => setShellCommandEnabled(e.target.checked)}
+              />
+              Cho phép chạy lệnh terminal từ dashboard
+            </label>
+            <p className="mt-1 text-[11px] text-ink-soft">
+              Tính năng này chạy lệnh bằng agent trên VPS. Mặc định tắt; chỉ bật khi bạn tin tưởng
+              người có quyền đăng nhập dashboard.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <button type="submit" className="btn-primary" disabled={savingDocker}>
+            {savingDocker && <Loader2 className="h-4 w-4 animate-spin" />}
+            Lưu cấu hình
+          </button>
+        </div>
       </form>
 
       <div className="card card-pad">

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/db';
+import { connectDB, getPool } from '@/lib/db';
 import { Agent } from '@/lib/models/Agent';
 import { Metric } from '@/lib/models/Metric';
 import { getSessionFromCookies } from '@/lib/auth';
@@ -27,6 +27,26 @@ export async function GET() {
   const latestMap = new Map<string, (typeof latest)[number]['metric']>();
   for (const item of latest) latestMap.set(item._id, item.metric);
 
+  const containerCounts = new Map<string, { running: number; total: number }>();
+  if (ids.length > 0) {
+    const pool = await getPool();
+    const r = await pool.query<{ agent_id: string; running: string; total: string }>(
+      `SELECT agent_id,
+              COUNT(*) FILTER (WHERE status <> 'removed') AS total,
+              COUNT(*) FILTER (WHERE status = 'running' OR state = 'running') AS running
+       FROM containers
+       WHERE agent_id = ANY($1::varchar[])
+       GROUP BY agent_id`,
+      [ids]
+    );
+    for (const row of r.rows) {
+      containerCounts.set(row.agent_id, {
+        running: Number(row.running ?? 0),
+        total: Number(row.total ?? 0),
+      });
+    }
+  }
+
   const offlineMs = env.AGENT_OFFLINE_AFTER_SECONDS * 1000;
   const now = Date.now();
 
@@ -34,6 +54,7 @@ export async function GET() {
     const m = latestMap.get(a.agentId);
     const online =
       a.lastSeenAt && now - new Date(a.lastSeenAt).getTime() <= offlineMs ? true : false;
+    const counts = containerCounts.get(a.agentId) ?? { running: 0, total: 0 };
     return {
       agentId: a.agentId,
       hostname: a.hostname,
@@ -52,6 +73,7 @@ export async function GET() {
       online,
       lastSeenAt: a.lastSeenAt,
       registeredAt: a.registeredAt,
+      containers: counts,
       latest: m
         ? {
             ts: m.ts,

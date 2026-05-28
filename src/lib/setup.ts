@@ -5,7 +5,7 @@ import { User } from './models/User';
 /** DB query only — use from API routes (return 503 on failure). Do not redirect. */
 export async function querySetupComplete(): Promise<boolean> {
   await connectDB();
-  const count = await User.countDocuments({});
+  const count = await User.countDocuments();
   return count > 0;
 }
 

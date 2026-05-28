@@ -1,20 +1,19 @@
 import { NextResponse } from 'next/server';
-import mongoose from 'mongoose';
-import { connectDB } from '@/lib/db';
+import { connectDB, pingDatabase } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function safeErr(err: unknown): { name: string; code?: number; message: string } {
+function safeErr(err: unknown): { name: string; code?: string; message: string } {
   if (!err || typeof err !== 'object') {
     return { name: 'Error', message: 'Unknown error' };
   }
-  const e = err as { name?: string; message?: string; code?: number };
+  const e = err as { name?: string; message?: string; code?: string };
   let msg = String(e.message ?? 'error');
   msg = msg.replace(/\/\/([^:@/]+):([^@/]+)@/g, '//***:***@');
   return {
     name: String(e.name ?? 'Error'),
-    code: typeof e.code === 'number' ? e.code : undefined,
+    code: typeof e.code === 'string' ? e.code : undefined,
     message: msg.slice(0, 800),
   };
 }
@@ -22,17 +21,19 @@ function safeErr(err: unknown): { name: string; code?: number; message: string }
 export async function GET() {
   try {
     await connectDB();
-    await mongoose.connection.db.admin().command({ ping: 1 });
+    const { database } = await pingDatabase();
     return NextResponse.json({
       ok: true,
-      database: mongoose.connection.db?.databaseName ?? null,
+      database,
     });
   } catch (err) {
     const s = safeErr(err);
     const authHint =
-      /authentication|auth failed|bad auth/i.test(s.message) || s.code === 18
-        ? 'Often fixed by appending ?authSource=admin (or the database where this user was created) to MONGODB_URI.'
-        : undefined;
+      /password authentication failed|invalid authorization/i.test(s.message)
+        ? 'Kiểm tra DB_USER / DB_PASSWORD (hoặc DATABASE_URL) khớp với PostgreSQL.'
+        : /does not exist/i.test(s.message)
+          ? 'Database chưa tồn tại — tạo DB (ví dụ vps_monitoring) hoặc sửa DB_NAME.'
+          : undefined;
     return NextResponse.json(
       {
         ok: false,

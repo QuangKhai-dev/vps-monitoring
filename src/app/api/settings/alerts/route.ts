@@ -18,6 +18,9 @@ const putSchema = z.object({
   alertRamPercent: z.number().int().min(1).max(100).optional(),
   alertDiskPercent: z.number().int().min(1).max(100).optional(),
   telegramCooldownSeconds: z.number().int().min(60).max(86_400).optional(),
+  containerMetricsRetentionDays: z.number().int().min(1).max(90).optional(),
+  containerControlEnabled: z.boolean().optional(),
+  shellCommandEnabled: z.boolean().optional(),
 });
 
 export async function GET() {

@@ -4,7 +4,6 @@ function resolveJwtSecret(): string {
   const fromEnv = process.env.JWT_SECRET;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
   if (process.env.NODE_ENV === 'production') {
-    // Throw lazily at request time, not at module load / build time.
     throw new Error(
       'Missing required environment variable: JWT_SECRET. Set it before starting the server.'
     );
@@ -12,9 +11,27 @@ function resolveJwtSecret(): string {
   return DEV_FALLBACK_SECRET;
 }
 
+function buildDatabaseUrl(): string {
+  const direct = process.env.DATABASE_URL?.trim();
+  if (direct) return direct;
+
+  const host = process.env.DB_HOST ?? 'localhost';
+  const port = process.env.DB_PORT ?? '5432';
+  const database =
+    process.env.DB_DATABASE?.trim() ||
+    process.env.DB_NAME?.trim() ||
+    'vps_monitoring';
+  const user = process.env.DB_USERNAME?.trim() || process.env.DB_USER?.trim() || 'admin';
+  const password = process.env.DB_PASSWORD ?? '';
+
+  const encUser = encodeURIComponent(user);
+  const encPass = encodeURIComponent(password);
+  return `postgresql://${encUser}:${encPass}@${host}:${port}/${database}`;
+}
+
 export const env = {
-  get MONGODB_URI(): string {
-    return process.env.MONGODB_URI ?? 'mongodb://localhost:27017/vps-monitoring';
+  get DATABASE_URL(): string {
+    return buildDatabaseUrl();
   },
   get JWT_SECRET(): string {
     return resolveJwtSecret();
